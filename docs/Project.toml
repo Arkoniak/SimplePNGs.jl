@@ -1,0 +1,3 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+SimplePNGs = "c3a86c57-f3b0-4bcf-9fd9-06b36638dc5d"
