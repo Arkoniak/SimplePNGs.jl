@@ -1,5 +1,7 @@
 module SimplePNGs
 
-# Write your package code here.
+function load(name)
+    return nothing
+end
 
 end
