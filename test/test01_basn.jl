@@ -1,7 +1,8 @@
 module BasiTest
-import FileIO
 using SimplePNGs
+import FileIO
 using Colors
+using Colors: N0f8
 using Test
 
 fl(name, corrected = false) = FileIO.load(joinpath("PngSuite", name * (corrected ? "_a" : "") * ".png"))
@@ -13,8 +14,11 @@ function testload(name; transform_palette = false, corrected = false)
 
     # For some reason default palette for grayscale in PNGFile is different
     # from wiki, gimp and other sources
+    # It looks like PNGFile apply square root transformation, so original images were
+    # converted in gimp to RGB format.
     if corrected
-        img1 = Gray.(red.(img1))
+        img1 = Gray{N0f8}.(red.(img1))
+        img2 = Gray{N0f8}.(img2)
     end
     if transform_palette
         plt1 = sort(unique(img1))
@@ -27,7 +31,9 @@ function testload(name; transform_palette = false, corrected = false)
             end
         end
     end
-    @test img1 == img2
+    
+    comp = map(x -> Int(x.val.i), img1) .- map(x -> Int(x.val.i), img2) |> x -> abs.(x) |> maximum
+    @test comp <= 1
 end
 
 @testset "Basic format test files (non-interlaced)" begin
@@ -48,7 +54,7 @@ end
     end
 
     @testset "16 bit (64k level) grayscale" begin
-        testload("basn0g16")
+        testload("basn0g16", corrected = true)
     end
 
     @testset "3x8 bits rgb color" begin

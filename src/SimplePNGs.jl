@@ -3,7 +3,7 @@ using CodecZlib
 using UnPack
 using Colors
 using Colors: N0f8, N0f16
-using Images
+using ColorVectorSpace
 
 function load(name)
     png = SimplePNG(chunkify(read(name)))
@@ -111,8 +111,12 @@ function extract(png)
     return data
 end
 
-function pixel(::Type{Gray{N0f8}}, c...)
-    return Gray{N0f8}(reinterpret(N0f8, UInt8(c[1])))
+function pixel(::Type{Gray{N0f8}}, c)
+    return Gray{N0f8}(reinterpret(N0f8, UInt8(c)))
+end
+
+function pixel(::Type{Gray{N0f16}}, c)
+    return Gray{N0f16}(reinterpret(N0f16, UInt16(c)))
 end
 
 function a(data::AbstractArray{T}, i, j) where T
@@ -152,55 +156,74 @@ end
 
 function build(png, data)
     @unpack colourtype, bitdepth, width, height = png
-    if colourtype == 0 && (bitdepth == 1 || bitdepth == 2 || bitdepth == 4 || bitdepth == 8)
-        res = Array{Gray{N0f8}}(undef, width, height)
+    if colourtype == 0 && (bitdepth == 1 || bitdepth == 2 || bitdepth == 4 || bitdepth == 8 || bitdepth == 16)
+        if bitdepth == 16
+            T = Gray{N0f16}
+        else
+            T = Gray{N0f8}
+        end
+        res = Array{T}(undef, width, height)
         idx = 0
         @inbounds for i in 1:height
             idx += 1
             ft = data[idx] # filter type
             shift = 0
             p = 0x00
+            if bitdepth == 16
+                idx += 1
+            end
             for j in 1:width
-                # color bits are written from left to right
-                if shift == 0
-                    idx += 1
-                    p = data[idx]
-                    if bitdepth == 1
-                        shift = 7
-                    elseif bitdepth == 2
-                        shift = 6
-                    elseif bitdepth == 4
-                        shift = 4
-                    elseif bitdepth == 8
-                        shift = 0
+                p2 = if bitdepth != 16
+                    # color bits are written from left to right
+                    if shift == 0
+                        idx += 1
+                        p = data[idx]
+                        if bitdepth == 1
+                            shift = 7
+                        elseif bitdepth == 2
+                            shift = 6
+                        elseif bitdepth == 4
+                            shift = 4
+                        elseif bitdepth == 8
+                            shift = 0
+                        end
+                    else
+                        if bitdepth == 1
+                            shift -= 1
+                        elseif bitdepth == 2
+                            shift -= 2
+                        elseif bitdepth == 4
+                            shift -= 4
+                        elseif bitdepth == 8
+                            shift -= 8
+                        end
                     end
+                    if bitdepth == 1
+                        p2 = (p >> shift) & 0x01 == 0x01 ? 0xff : 0x00
+                    elseif bitdepth == 2
+                        p2 = ((p >> shift) & 0x03) * 0x55
+                    elseif bitdepth == 4
+                        p2 = ((p >> shift) & 0x0f) * 0x11
+                    elseif bitdepth == 8
+                        p2 = p
+                    end
+
+                    pixel(T, p2)
                 else
-                    if bitdepth == 1
-                        shift -= 1
-                    elseif bitdepth == 2
-                        shift -= 2
-                    elseif bitdepth == 4
-                        shift -= 4
-                    elseif bitdepth == 8
-                        shift -= 8
-                    end
-                end
-                if bitdepth == 1
-                    p2 = (p >> shift) & 0x01 == 0x01 ? 0xff : 0x00
-                elseif bitdepth == 2
-                    p2 = ((p >> shift) & 0x03) * 0x55
-                elseif bitdepth == 4
-                    p2 = ((p >> shift) & 0x0f) * 0x11
-                elseif bitdepth == 8
-                    p2 = p
+                    p2 = UInt16(data[idx])
+                    p2 = p2 << 8
+                    p2 = p2 | data[idx + 1]
+                    idx += 2
+
+                    pixel(T, p2)
                 end
 
-                p2 = pixel(Gray{N0f8}, p2)
-                
                 if ft == 0x00
                     res[i, j] = p2
                 elseif ft == 0x01
                     res[i, j] = p2 + a(res, i, j)
+                elseif ft == 0x02
+                    res[i, j] = p2 + b(res, i, j)
                 elseif ft == 0x04
                     res[i, j] = p2 + paeth(res, i, j)
                 else
@@ -230,6 +253,9 @@ function build(png, data)
                 # end
                 # res[i, j] = rgb(data[idx], data[idx+1], data[idx+2])
                 # idx += 3
+            end
+            if bitdepth == 16
+                idx -= 1
             end
         end
     end
