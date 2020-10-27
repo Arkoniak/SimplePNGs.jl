@@ -10,8 +10,9 @@ Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 
 [compat]
-Images = "0.22, 0.23"
+CodecZlib = "0.7"
 Colors = "0.12"
+Images = "0.22, 0.23"
 UnPack = "1"
 julia = "1"
 
