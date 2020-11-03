@@ -1,9 +1,8 @@
 module SimplePNGs
 using CodecZlib
 using UnPack
-using Colors
-using Colors: N0f8, N0f16
-using ColorVectorSpace
+using FixedPointNumbers
+using ColorTypes
 
 function load(name)
     png = SimplePNG(chunkify(read(name)))
@@ -56,6 +55,14 @@ function casttoint(data, idx)
     return x
 end
 
+function casttouint16(data, idx)
+    @inbounds x = UInt16(data[idx])
+    x = x << 8
+    @inbounds x = x | data[idx + 1]
+    
+    return x
+end
+
 struct SimplePNG
     bitdepth::Int
     colourtype::Int
@@ -83,6 +90,14 @@ end
 
 function name(chunk::Chunk)
     String(Char.(chunk.name))
+end
+
+function palette(chunk)
+    res = Vector{RGB{N0f8}}(undef, length(chunk) ÷ 3)
+    for i in 1:length(res)
+        res[i] = pixel(RGB{N0f8}, chunk[3i - 2], chunk[3i - 1], chunk[3i])
+    end
+    return res
 end
 
 function firstdata(png)
@@ -119,17 +134,63 @@ function pixel(::Type{Gray{N0f16}}, c)
     return Gray{N0f16}(reinterpret(N0f16, UInt16(c)))
 end
 
+function pixel(::Type{RGB{N0f8}}, r, g, b)
+    RGB{N0f8}(reinterpret(N0f8, r),
+        reinterpret(N0f8, g),
+        reinterpret(N0f8, b))
+end
+
+function pixel(::Type{RGB{N0f16}}, r, g, b)
+    RGB{N0f16}(reinterpret(N0f16, r),
+        reinterpret(N0f16, g),
+        reinterpret(N0f16, b))
+end
+
+function byteadd(n1::N0f8, n2::N0f8)
+    v1 = reinterpret(UInt8, n1)
+    v2 = reinterpret(UInt8, n2)
+    return reinterpret(N0f8, v1 + v2)
+end
+
+function byteadd(n1::N0f16, n2::N0f16)
+    v1 = reinterpret(UInt16, n1)
+    v2 = reinterpret(UInt16, n2)
+    b1 = UInt8(v1 & 0x00ff)
+    b2 = UInt8(v2 & 0x00ff)
+    c1 = v1 & 0xff00
+    c2 = v2 & 0xff00
+    return reinterpret(N0f16, (c1 + c2) | (b1 + b2))
+end
+
+function compose(p1::T, p2::T) where {T <: AbstractRGB}
+    RGB(byteadd(red(p1), red(p2)),
+        byteadd(green(p1), green(p2)),
+        byteadd(blue(p1), blue(p2)))
+end
+
+function compose(p1::T, p2::T) where {T <: AbstractGray}
+    Gray(byteadd(gray(p1), gray(p2)))
+end
+
+zero1(::Type{C}) where {C<:TransparentRGB} = C(0,0,0,0)
+zero1(::Type{C}) where {C<:AbstractRGB}    = C(0,0,0)
+zero1(::Type{C}) where {C<:TransparentGray} = C(0,0)
+zero1(::Type{C}) where {C<:AbstractGray} = C(0)
+
 function a(data::AbstractArray{T}, i, j) where T
-    @inbounds j == 1 ? pixel(T, 0x00) : data[i, j - 1]
+    @inbounds j == 1 ? zero1(T) : data[i, j - 1]
 end
 
 function b(data::AbstractArray{T}, i, j) where T
-    @inbounds i == 1 ? pixel(T, 0x00) : data[i - 1, j]
+    @inbounds i == 1 ? zero1(T) : data[i - 1, j]
 end
 
 function c(data::AbstractArray{T}, i, j) where T
-    @inbounds (i == 1) | (j == 1) ? pixel(T, 0x00) : data[i - 1, j - 1]
+    @inbounds (i == 1) | (j == 1) ? zero1(T) : data[i - 1, j - 1]
 end
+
+tuplify(c::AbstractGray) = reinterpret.((gray(c), ))
+tuplify(c::AbstractRGB) = reinterpret.((red(c), green(c), blue(c)))
 
 function paeth_internal(a, b, c)
     p = Int(a) + Int(b) - Int(c)
@@ -146,38 +207,63 @@ function paeth_internal(a, b, c)
 end
 
 function paeth(data::AbstractArray{T}, i, j) where T
-    a1 = a(data, i, j)
-    b1 = b(data, i, j)
-    c1 = c(data, i, j)
-    if T <: Gray
-        return pixel(T, paeth_internal(a1.val.i, b1.val.i, c1.val.i))
-    end
+    a1 = a(data, i, j) |> tuplify
+    b1 = b(data, i, j) |> tuplify
+    c1 = c(data, i, j) |> tuplify
+    p = paeth_internal.(a1, b1, c1)
+    return pixel(T, p...)
+end
+
+function avg(a::UInt8, b::UInt8)
+    return UInt8((UInt16(a) + UInt16(b)) >> 1)
+end
+
+function avg(a::UInt16, b::UInt16)
+    return UInt16((UInt32(a) + UInt32(b)) >> 1)
+end
+
+function avg(data::AbstractArray{T}, i, j) where T
+    a1 = a(data, i, j) |> tuplify
+    b1 = b(data, i, j) |> tuplify
+
+    return pixel(T, avg.(a1, b1))
 end
 
 function build(png, data)
     @unpack colourtype, bitdepth, width, height = png
-    if colourtype == 0 && (bitdepth == 1 || bitdepth == 2 || bitdepth == 4 || bitdepth == 8 || bitdepth == 16)
+    local plte
+    if colourtype == 0
         if bitdepth == 16
             T = Gray{N0f16}
         else
             T = Gray{N0f8}
         end
-        res = Array{T}(undef, width, height)
-        idx = 0
-        @inbounds for i in 1:height
-            idx += 1
-            ft = data[idx] # filter type
-            shift = 0
-            p = 0x00
-            if bitdepth == 16
-                idx += 1
-            end
-            for j in 1:width
-                p2 = if bitdepth != 16
+    elseif colourtype == 2
+        if bitdepth == 16
+            T = RGB{N0f16}
+        else
+            T = RGB{N0f8}
+        end
+    elseif colourtype == 3
+        T = RGB{N0f8}
+        idx = findfirst(x -> name(x) == "PLTE", png.chunks)
+        chunk = png.chunks[idx]
+        plte = palette(chunk.data)
+    end
+    res = Array{T}(undef, width, height)
+    idx = 1
+    @inbounds for i in 1:height
+        ft = data[idx] # filter type
+        shift = 0
+        p = 0x00
+        idx += 1
+        for j in 1:width
+            p2 = if colourtype == 0 
+                if bitdepth != 16
                     # color bits are written from left to right
                     if shift == 0
-                        idx += 1
                         p = data[idx]
+                        idx += 1
                         if bitdepth == 1
                             shift = 7
                         elseif bitdepth == 2
@@ -217,45 +303,67 @@ function build(png, data)
 
                     pixel(T, p2)
                 end
-
-                if ft == 0x00
-                    res[i, j] = p2
-                elseif ft == 0x01
-                    res[i, j] = p2 + a(res, i, j)
-                elseif ft == 0x02
-                    res[i, j] = p2 + b(res, i, j)
-                elseif ft == 0x04
-                    res[i, j] = p2 + paeth(res, i, j)
-                else
-                    error("Unrecognized filter type: ", ft)
+            elseif colourtype == 2
+                # Warning, it is possible that PLTE can be used here
+                if bitdepth == 8
+                    idx += 3
+                    pixel(T, data[idx - 3], data[idx - 2], data[idx - 1])
+                elseif bitdepth == 16
+                    idx += 6
+                    r1 = casttouint16(data, idx - 6)
+                    g1 = casttouint16(data, idx - 4)
+                    b1 = casttouint16(data, idx - 2)
+                    pixel(T, r1, g1, b1)
                 end
-                # if ft == 0x01
-                #     if j != 1
-                #         data[idx] += data[idx - 3]
-                #         data[idx + 1] += data[idx - 2]
-                #         data[idx + 2] += data[idx - 1]
-                #     end
-                # elseif ft == 0x02
-                #     if i != 1
-                #         data[idx] += data[idx - 1 - 3*w]
-                #         data[idx + 1] += data[idx - 3*w]
-                #         data[idx + 2] += data[idx + 1 - 3*w]
-                #     end
-                # elseif ft == 0x04
-                #     data[idx] += paeth(data, w, 3, idx, i, j)
-                #     data[idx + 1] += paeth(data, w, 3, idx + 1, i, j)
-                #     data[idx + 2] += paeth(data, w, 3, idx + 2, i, j)
-                # elseif ft == 0x03
-                #     data[idx] += avg(data, w, 3, idx, i, j)
-                #     data[idx + 1] += avg(data, w, 3, idx + 1, i, j)
-                #     data[idx + 2] += avg(data, w, 3, idx + 1, i, j)
-                # else
-                # end
-                # res[i, j] = rgb(data[idx], data[idx+1], data[idx+2])
-                # idx += 3
+            elseif colourtype == 3
+                if shift == 0
+                    p = data[idx]
+                    idx += 1
+                    if bitdepth == 1
+                        shift = 7
+                    elseif bitdepth == 2
+                        shift = 6
+                    elseif bitdepth == 4
+                        shift = 4
+                    elseif bitdepth == 8
+                        shift = 0
+                    end
+                else
+                    if bitdepth == 1
+                        shift -= 1
+                    elseif bitdepth == 2
+                        shift -= 2
+                    elseif bitdepth == 4
+                        shift -= 4
+                    elseif bitdepth == 8
+                        shift -= 8
+                    end
+                end
+                if bitdepth == 1
+                    p2 = (p >> shift) & 0x01
+                elseif bitdepth == 2
+                    p2 = (p >> shift) & 0x03
+                elseif bitdepth == 4
+                    p2 = (p >> shift) & 0x0f
+                elseif bitdepth == 8
+                    p2 = p
+                end
+                
+                plte[p2 + 1]
             end
-            if bitdepth == 16
-                idx -= 1
+
+            if ft == 0x00
+                res[i, j] = p2
+            elseif ft == 0x01
+                res[i, j] = compose(p2, a(res, i, j))
+            elseif ft == 0x02
+                res[i, j] = compose(p2, b(res, i, j))
+            elseif ft == 0x03
+                res[i, j] = compose(p2, avg(res, i, j))
+            elseif ft == 0x04
+                res[i, j] = compose(p2, paeth(res, i, j))
+            else
+                error("Unrecognized filter type: ", ft)
             end
         end
     end
