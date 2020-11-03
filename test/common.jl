@@ -67,8 +67,8 @@ function reconstruct(x::JsonIMG)
 end
 
 function save_json(name)
-    namein = joinpath("test", "PngSuite", name*".png")
-    nameout = joinpath("test", "jsons", name*"_json.gz")
+    namein = joinpath("..", "test", "PngSuite", name*".png")
+    nameout = joinpath("..", "test", "jsons", name*"_json.gz")
 
     img = SimplePNGs.load(namein)
     out = JSON3.write(JsonIMG(img))
@@ -81,7 +81,7 @@ function load_json(name, test = true)
     if test
         namein = joinpath("jsons", name*"_json.gz")
     else
-        namein = joinpath("test", "jsons", name*"_json.gz")
+        namein = joinpath("..", "test", "jsons", name*"_json.gz")
     end
     json = transcode(GzipDecompressor, read(namein))
     json_img = JSON3.read(json, JsonIMG)

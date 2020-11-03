@@ -92,6 +92,14 @@ function name(chunk::Chunk)
     String(Char.(chunk.name))
 end
 
+function palette(chunk)
+    res = Vector{RGB{N0f8}}(undef, length(chunk) ÷ 3)
+    for i in 1:length(res)
+        res[i] = pixel(RGB{N0f8}, chunk[3i - 2], chunk[3i - 1], chunk[3i])
+    end
+    return res
+end
+
 function firstdata(png)
     idx = 0
     while idx < length(png.chunks)
@@ -223,6 +231,7 @@ end
 
 function build(png, data)
     @unpack colourtype, bitdepth, width, height = png
+    local plte
     if colourtype == 0
         if bitdepth == 16
             T = Gray{N0f16}
@@ -235,6 +244,11 @@ function build(png, data)
         else
             T = RGB{N0f8}
         end
+    elseif colourtype == 3
+        T = RGB{N0f8}
+        idx = findfirst(x -> name(x) == "PLTE", png.chunks)
+        chunk = png.chunks[idx]
+        plte = palette(chunk.data)
     end
     res = Array{T}(undef, width, height)
     idx = 1
@@ -290,6 +304,7 @@ function build(png, data)
                     pixel(T, p2)
                 end
             elseif colourtype == 2
+                # Warning, it is possible that PLTE can be used here
                 if bitdepth == 8
                     idx += 3
                     pixel(T, data[idx - 3], data[idx - 2], data[idx - 1])
@@ -300,6 +315,41 @@ function build(png, data)
                     b1 = casttouint16(data, idx - 2)
                     pixel(T, r1, g1, b1)
                 end
+            elseif colourtype == 3
+                if shift == 0
+                    p = data[idx]
+                    idx += 1
+                    if bitdepth == 1
+                        shift = 7
+                    elseif bitdepth == 2
+                        shift = 6
+                    elseif bitdepth == 4
+                        shift = 4
+                    elseif bitdepth == 8
+                        shift = 0
+                    end
+                else
+                    if bitdepth == 1
+                        shift -= 1
+                    elseif bitdepth == 2
+                        shift -= 2
+                    elseif bitdepth == 4
+                        shift -= 4
+                    elseif bitdepth == 8
+                        shift -= 8
+                    end
+                end
+                if bitdepth == 1
+                    p2 = (p >> shift) & 0x01
+                elseif bitdepth == 2
+                    p2 = (p >> shift) & 0x03
+                elseif bitdepth == 4
+                    p2 = (p >> shift) & 0x0f
+                elseif bitdepth == 8
+                    p2 = p
+                end
+                
+                plte[p2 + 1]
             end
 
             if ft == 0x00
