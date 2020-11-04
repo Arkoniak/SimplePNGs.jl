@@ -9,6 +9,7 @@ makedocs(;
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
         canonical="https://Arkoniak.github.io/SimplePNGs.jl",
+        siteurl="https://github.com/Arkoniak/SimplePNGs.jl",
         assets=String[],
     ),
     pages=[

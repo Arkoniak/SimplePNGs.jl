@@ -28,6 +28,17 @@ function JsonIMG(x::AbstractArray{T0}) where {T0 <: AbstractGray}
     return JsonIMG(T, width, height, data)
 end
 
+function JsonIMG(x::AbstractArray{T0}) where {T0 <: GrayA}
+    T = eltype(x) |> Symbol |> String
+    T = replace(T, "ColorTypes." => "")
+    T = replace(T, "FixedPointNumbers." => "")
+    width, height = size(x)
+    data = vcat(vec(reinterpret.(gray.(x))),
+                vec(reinterpret.(alpha.(x))))
+
+    return JsonIMG(T, width, height, data)
+end
+
 function JsonIMG(x::AbstractArray{T0}) where {T0 <: AbstractRGB}
     T = eltype(x) |> Symbol |> String
     T = replace(T, "ColorTypes." => "")
@@ -61,6 +72,16 @@ function reconstruct(x::JsonIMG)
         lng = x.width * x.height
         data = UInt16.(x.data)
         SimplePNGs.pixel.(T, data[1:lng], data[lng+1:2*lng], data[2*lng+1:3*lng])
+    elseif T0 == "GrayA{Normed{UInt8,8}}"
+        T = GrayA{N0f8}
+        lng = x.width * x.height
+        data = UInt8.(x.data)
+        SimplePNGs.pixel.(T, data[1:lng], data[lng+1:2*lng])
+    elseif T0 == "GrayA{Normed{UInt16,16}}"
+        T = GrayA{N0f16}
+        lng = x.width * x.height
+        data = UInt16.(x.data)
+        SimplePNGs.pixel.(T, data[1:lng], data[lng+1:2*lng])
     end
 
     reshape(res, x.width, x.height)
