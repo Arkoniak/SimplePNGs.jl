@@ -38,6 +38,14 @@ load_json("basn3p04", false)
 save_json("basn3p08")
 load_json("basn3p08", false)
 
-SimplePNGs.load("test/PngSuite/basn0g01.png") == load_json("basn0g01", false)
-SimplePNGs.load("test/PngSuite/basn2c08.png") == load_json("basn2c08", false)
-SimplePNGs.load("test/PngSuite/basn2c16.png") == load_json("basn2c16", false)
+save_json("basn4a08")
+load_json("basn4a08", false)
+
+save_json("basn4a16")
+load_json("basn4a16", false)
+
+SimplePNGs.load("../test/PngSuite/basn0g01.png") == load_json("basn0g01", false)
+SimplePNGs.load("../test/PngSuite/basn2c08.png") == load_json("basn2c08", false)
+SimplePNGs.load("../test/PngSuite/basn2c16.png") == load_json("basn2c16", false)
+SimplePNGs.load("../test/PngSuite/basn4a08.png") == load_json("basn4a08", false)
+SimplePNGs.load("../test/PngSuite/basn4a16.png") == load_json("basn4a16", false)
