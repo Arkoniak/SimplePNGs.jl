@@ -87,9 +87,15 @@ pl(name) = SimplePNGs.load(joinpath("PngSuite", name*".png"))
     end
 
     @testset "3x8 bits rgb color + 8 bit alpha-channel" begin
+        img1 = load_json("basn6a08")
+        img2 = pl("basn6a08")
+        @test img1 == img2
     end
 
     @testset "3x16 bits rgb color + 16 bit alpha-channel" begin
+        img1 = load_json("basn6a16")
+        img2 = pl("basn6a16")
+        @test img1 == img2
     end
 end
 

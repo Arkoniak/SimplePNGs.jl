@@ -51,6 +51,19 @@ function JsonIMG(x::AbstractArray{T0}) where {T0 <: AbstractRGB}
     return JsonIMG(T, width, height, data)
 end
 
+function JsonIMG(x::AbstractArray{T0}) where {T0 <: RGBA}
+    T = eltype(x) |> Symbol |> String
+    T = replace(T, "ColorTypes." => "")
+    T = replace(T, "FixedPointNumbers." => "")
+    width, height = size(x)
+    data = vcat(vec(reinterpret.(red.(x))),
+                vec(reinterpret.(green.(x))),
+                vec(reinterpret.(blue.(x))),
+                vec(reinterpret.(alpha.(x))))
+
+    return JsonIMG(T, width, height, data)
+end
+
 function reconstruct(x::JsonIMG)
     T0 = replace(x.T, "ColorTypes." => "")
     T0 = replace(T0, "FixedPointNumbers." => "")
@@ -82,6 +95,16 @@ function reconstruct(x::JsonIMG)
         lng = x.width * x.height
         data = UInt16.(x.data)
         SimplePNGs.pixel.(T, data[1:lng], data[lng+1:2*lng])
+    elseif T0 == "RGBA{Normed{UInt8,8}}"
+        T = RGBA{N0f8}
+        lng = x.width * x.height
+        data = UInt8.(x.data)
+        SimplePNGs.pixel.(T, data[1:lng], data[lng+1:2*lng], data[2*lng+1:3*lng], data[3*lng+1:4*lng])
+    elseif T0 == "RGBA{Normed{UInt16,16}}"
+        T = RGBA{N0f16}
+        lng = x.width * x.height
+        data = UInt16.(x.data)
+        SimplePNGs.pixel.(T, data[1:lng], data[lng+1:2*lng], data[2*lng+1:3*lng], data[3*lng+1:4*lng])
     end
 
     reshape(res, x.width, x.height)

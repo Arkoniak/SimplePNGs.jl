@@ -144,7 +144,7 @@ function pixel(::Type{RGB{T}}, r, g, b) where T
 end
 
 function pixel(::Type{RGBA{T}}, r, g, b, alpha) where T
-    RGB{T}(reinterpret(T, r),
+    RGBA{T}(reinterpret(T, r),
         reinterpret(T, g),
         reinterpret(T, b),
         reinterpret(T, alpha))
@@ -258,6 +258,12 @@ function build!(png, data)
         else
             T = GrayA{N0f16}
         end
+    else
+        if bitdepth == 8
+            T = RGBA{N0f8}
+        else
+            T = RGBA{N0f16}
+        end
     end
     res = Array{T}(undef, width, height)
     idx = 1
@@ -361,6 +367,22 @@ function build!(png, data)
                     c = casttouint16(data, idx - 4)
                     alpha = casttouint16(data, idx - 2)
                     pixel(T, c, alpha)
+                end
+            else
+                if bitdepth == 8
+                    idx += 4
+                    r1 = data[idx - 4]
+                    g1 = data[idx - 3]
+                    b1 = data[idx - 2]
+                    alpha1 = data[idx - 1]
+                    pixel(T, r1, g1, b1, alpha1)
+                else
+                    idx += 8
+                    r1 = casttouint16(data, idx - 8)
+                    g1 = casttouint16(data, idx - 6)
+                    b1 = casttouint16(data, idx - 4)
+                    alpha1 = casttouint16(data, idx - 2)
+                    pixel(T, r1, g1, b1, alpha1)
                 end
             end
             
