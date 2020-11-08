@@ -104,6 +104,30 @@ load_json("s39n3p04", false)
 save_json("s40n3p04")
 load_json("s40n3p04", false)
 
+save_json("f00n0g08")
+load_json("f00n0g08", false)
+
+save_json("f01n0g08")
+load_json("f01n0g08", false)
+
+save_json("f02n0g08")
+load_json("f02n0g08", false)
+
+save_json("f03n0g08")
+load_json("f03n0g08", false)
+
+save_json("f00n2c08")
+load_json("f00n2c08", false)
+
+save_json("f01n2c08")
+load_json("f01n2c08", false)
+
+save_json("f02n2c08")
+load_json("f02n2c08", false)
+
+save_json("f03n2c08")
+load_json("f03n2c08", false)
+
 SimplePNGs.load("../test/PngSuite/basn0g01.png") == load_json("basn0g01", false)
 SimplePNGs.load("../test/PngSuite/basn2c08.png") == load_json("basn2c08", false)
 SimplePNGs.load("../test/PngSuite/basn2c16.png") == load_json("basn2c16", false)
