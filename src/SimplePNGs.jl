@@ -199,16 +199,52 @@ function bytes(colourtype, bitdepth)
     end
 end
 
-function process!(png, data)
-    @unpack colourtype, bitdepth, width, height, byteshift = png
-
-    idx = 1
-    width = if bitdepth < 8
-        x, y = divrem(width, 8 ÷ bitdepth)
+function scale_width(width, bpb, bitdepth)
+    return if bitdepth < 8
+        x, y = divrem(width, bpb)
         x + (y > 0)
     else
         width
     end
+end
+
+function level2wh(width, height, level, bpb, bitdepth, width1, height1, scale = true)
+    if level == 1
+        x, y = divrem(width, 8)
+        width1 = scale ? scale_width(x + (y > 0), bpb, bitdepth) : x + (y > 0)
+        x, y = divrem(height, 8)
+        height1 = x + (y > 0)
+    elseif level == 2
+        x, y = divrem(width, 8)
+        width1 = scale ? scale_width(x + (y > 4), bpb, bitdepth) : x + (y > 4)
+    elseif level == 3
+        x, y = divrem(width, 4)
+        width1 = scale ? scale_width(x + (y > 0), bpb, bitdepth) : x + (y > 0)
+        x, y = divrem(height, 8)
+        height1 = x + (y > 4)
+    elseif level == 4
+        x, y = divrem(width, 4)
+        width1 = scale ? scale_width(x + (y > 2), bpb, bitdepth) : x + (y > 2)
+        x, y = divrem(height, 4)
+        height1 = x + (y > 0)
+    elseif level == 5
+        x, y = divrem(width, 2)
+        width1 = scale ? scale_width(x + y, bpb, bitdepth) : x + y
+        x, y = divrem(height, 4)
+        height1 = x + (y > 2)
+    elseif level == 6
+        width1 = scale ? scale_width(width ÷ 2, bpb, bitdepth) : width ÷ 2
+        x, y = divrem(height, 2)
+        height1 = x + y
+    elseif level == 7
+        width1 = scale ? scale_width(width, bpb, bitdepth) : width
+        height1 = height ÷ 2
+    end
+
+    return width1, height1
+end
+
+function process!(data, idx, width, height, byteshift)
     @inbounds for i in 1:height
         ft = data[idx]
         idx += 1
@@ -228,13 +264,31 @@ function process!(png, data)
         end
     end
 
+    return idx
+end
+
+function process!(png, data)
+    @unpack colourtype, bitdepth, width, height, byteshift, interlace = png
+
+    idx = 1
+    bpb = 8 ÷ bitdepth
+    if interlace == 0
+        width = scale_width(width, bpb, bitdepth)
+        process!(data, idx, width, height, byteshift)
+    else
+        height1, width1 = 0, 0
+        for level in 1:7
+            width1, height1 = level2wh(width, height, level, bpb, bitdepth, width1, height1)
+            if (width1 > 0) & (height1 > 0)
+                idx = process!(data, idx, width1, height1, byteshift)
+            end
+        end
+    end
+
     return data
 end
 
-function build!(png, data)
-    @unpack colourtype, bitdepth, width, height, byteshift = png
-    process!(png, data)
-    local plte
+function prepare_array(colourtype, bitdepth, width, height)
     if colourtype == 0
         if bitdepth == 16
             T = Gray{N0f16}
@@ -249,9 +303,6 @@ function build!(png, data)
         end
     elseif colourtype == 3
         T = RGB{N0f8}
-        idx = findfirst(x -> name(x) == "PLTE", png.chunks)
-        chunk = png.chunks[idx]
-        plte = palette(chunk.data)
     elseif colourtype == 4
         if bitdepth == 8
             T = GrayA{N0f8}
@@ -265,13 +316,74 @@ function build!(png, data)
             T = RGBA{N0f16}
         end
     end
-    res = Array{T}(undef, width, height)
+
+    return Array{T}(undef, width, height)
+end
+
+function build!(png, data)
+    @unpack colourtype, bitdepth, width, height, byteshift, interlace = png
+    process!(png, data)
+    if colourtype == 3
+        idx = findfirst(x -> name(x) == "PLTE", png.chunks)
+        chunk = png.chunks[idx]
+        plte = palette(chunk.data)
+    else
+        plte = nothing
+    end
+    res = prepare_array(colourtype, bitdepth, width, height)
     idx = 1
+    
+    if interlace == 0
+        build!(res, data, idx, width, height, colourtype, bitdepth, plte, 0)
+    else
+        bpb = 8 ÷ bitdepth
+        width1, height1 = 0, 0
+        for level in 1:7
+            width1, height1 = level2wh(width, height, level, bpb, bitdepth, width1, height1, false)
+            if (width1 > 0) & (height1 > 0)
+                idx = build!(res, data, idx, width1, height1, colourtype, bitdepth, plte, level)
+            end
+        end
+    end
+    return res
+end
+
+function nexti(i, level)
+    (level == 0) && return i + 1
+    (level == 1) | (level == 2) | (level == 3) && return i + 8
+    (level == 4) | (level == 5) && return i + 4
+    (level == 6) | (level == 7) && return i + 2
+end
+
+function nextj(j, level)
+    (level == 0) | (level == 7) && return j + 1
+    (level == 1) | (level == 2) && return j + 8
+    (level == 3) | (level == 4) && return j + 4
+    (level == 5) | (level == 6) && return j + 2
+end
+
+function startpoint(level)
+    level == 0 && return (0, 0)   # .+ (1, 1) == (1, 1)
+    level == 1 && return (-7, -7) # .+ (8, 8) == (1, 1)
+    level == 2 && return (-7, -3) # .+ (8, 8) == (1, 5)
+    level == 3 && return (-3, -3) # .+ (8, 4) == (5, 1)
+    level == 4 && return (-3, -1) # .+ (4, 4) == (1, 3)
+    level == 5 && return (-1, -1) # .+ (4, 2) == (3, 1)
+    level == 6 && return (-1, 0)  # .+ (2, 2) == (1, 2)
+    level == 7 && return (0, 0)   # .+ (2, 1) == (2, 1)
+end
+
+function build!(res::Array{T, 2}, data, idx, width, height, colourtype, bitdepth, plte, level) where T
+    i1, j1 = startpoint(level)
+    j2 = j1
     @inbounds for i in 1:height
+        i1 = nexti(i1, level)
+        j1 = j2  # reset counter
         shift = 0
         p = 0x00
         idx += 1
         for j in 1:width
+            j1 = nextj(j1, level)
             p2 = if colourtype == 0 
                 if bitdepth != 16
                     # color bits are written from left to right
@@ -386,11 +498,11 @@ function build!(png, data)
                 end
             end
             
-            res[i, j] = p2
+            res[i1, j1] = p2
         end
     end
 
-    return res
+    return idx
 end
 
 end # module
